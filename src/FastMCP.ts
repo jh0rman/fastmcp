@@ -18,8 +18,7 @@ import {
   ServerCapabilities,
   SetLevelRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { zodToJsonSchema } from "zod-to-json-schema";
-import { z } from "zod";
+import { z, ZodTypeAny } from "zod";
 import { setTimeout as delay } from "timers/promises";
 import { readFile } from "fs/promises";
 import { fileTypeFromBuffer } from "file-type";
@@ -110,8 +109,6 @@ export class UnexpectedStateError extends FastMCPError {
  * An error that is meant to be surfaced to the user.
  */
 export class UserError extends UnexpectedStateError {}
-
-type ToolParameters = z.ZodTypeAny;
 
 type Literal = boolean | null | number | string | undefined;
 
@@ -220,12 +217,12 @@ const CompletionZodSchema = z.object({
   hasMore: z.optional(z.boolean()),
 }) satisfies z.ZodType<Completion>;
 
-type Tool<T extends FastMCPSessionAuth, Params extends ToolParameters = ToolParameters> = {
+type Tool<T extends FastMCPSessionAuth, Params extends z.ZodRawShape> = {
   name: string;
-  description?: string;
-  parameters?: Params;
+  description: string;
+  parameters: Params;
   execute: (
-    args: z.infer<Params>,
+    args: z.objectOutputType<Params, ZodTypeAny>,
     context: Context<T>,
   ) => Promise<string | ContentResult | TextContent | ImageContent>;
 };
@@ -393,7 +390,7 @@ export class FastMCPSession<T extends FastMCPSessionAuth = FastMCPSessionAuth> e
     auth?: T;
     name: string;
     version: string;
-    tools: Tool<T>[];
+    tools: Tool<any, any>[];
     resources: Resource[];
     resourcesTemplates: InputResourceTemplate[];
     prompts: Prompt[];
@@ -710,7 +707,7 @@ export class FastMCPSession<T extends FastMCPSessionAuth = FastMCPSessionAuth> e
     });
   }
 
-  private setupToolHandlers(tools: Tool<T>[]) {
+  private setupToolHandlers(tools: Tool<any, any>[]) {
     this.#server.setRequestHandler(ListToolsRequestSchema, async () => {
       return {
         tools: tools.map((tool) => {
@@ -718,8 +715,6 @@ export class FastMCPSession<T extends FastMCPSessionAuth = FastMCPSessionAuth> e
             name: tool.name,
             description: tool.description,
             inputSchema: tool.parameters
-              ? zodToJsonSchema(tool.parameters)
-              : undefined,
           };
         }),
       };
@@ -1035,7 +1030,7 @@ export class FastMCP<T extends Record<string, unknown> | undefined = undefined> 
   #resourcesTemplates: InputResourceTemplate[] = [];
   #sessions: FastMCPSession<T>[] = [];
   #sseServer: SSEServer | null = null;
-  #tools: Tool<T>[] = [];
+  #tools: Tool<any, any>[] = [];
   #authenticate: Authenticate<T> | undefined;
 
   constructor(public options: ServerOptions<T>) {
@@ -1052,8 +1047,8 @@ export class FastMCP<T extends Record<string, unknown> | undefined = undefined> 
   /**
    * Adds a tool to the server.
    */
-  public addTool<Params extends ToolParameters>(tool: Tool<T, Params>) {
-    this.#tools.push(tool as unknown as Tool<T>);
+  public addTool<T extends z.ZodRawShape>(tool: Tool<any, T>) {
+    this.#tools.push(tool);
   }
 
   /**
@@ -1165,10 +1160,14 @@ export class FastMCP<T extends Record<string, unknown> | undefined = undefined> 
       this.#sseServer.close();
     }
   }
+
+  public static createTool<T extends z.ZodRawShape>(tool: Tool<any, T>) {
+    return tool;
+  }
 }
 
 export type { Context };
-export type { Tool, ToolParameters };
+export type { Tool };
 export type { Content, TextContent, ImageContent, ContentResult };
 export type { Progress, SerializableValue };
 export type { Resource, ResourceResult };
